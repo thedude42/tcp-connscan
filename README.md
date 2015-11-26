@@ -1,8 +1,7 @@
 # tcp-connscan 
 
-[![Build Status](https://travis-ci.org/thedude42/tcp-connscan.svg?branch=master)](https://travis-ci.org/thedude42/tcp-connscan)
-
 Simple port scanner using the core net module as the "port prober"
+[![Build Status](https://travis-ci.org/thedude42/tcp-connscan.svg?branch=master)](https://travis-ci.org/thedude42/tcp-connscan)
 
 ## Installation
 
