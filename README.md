@@ -1,4 +1,4 @@
-# tcp-connscan (travis ci tag goes here)
+# tcp-connscan [https://travis-ci.org/thedude42/tcp-connscan.svg?branch=master]
 
 Simple port scanner using the core net module as the "port prober"
 
