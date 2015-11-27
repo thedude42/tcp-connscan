@@ -24,57 +24,63 @@ var child_process = require("child_process"),
 
 
 // Constants
-//var SCANNER_MODULE = "childscanner.js",
+//resolve path to "childscanner.js" needed for proper npm package behavior
 var SCANNER_MODULE = path.join(path.dirname(fs.realpathSync(__filename)), './childscanner.js'),
-    CORES = require("os").cpus().length,
-    WORKERS = CORES;
+    CORES = require("os").cpus().length;
 
 // Module vars
-var children = [],
-    results = {
+var mod = {
+    WORKERS: CORES,
+    children: [],
+    results: {
         open:[],
         closed:[],
         filtered:[],
         scanned:[]
     },
-    FISHY_ADDRESS = false,
-    ServicesDBTcp = {},
-    START_PORT = 1,
-    END_PORT = 65535,
-    NUM_PORTS = END_PORT - START_PORT + 1,
-    ADDR = false,
-    guard = workersGate(WORKERS);
+    FISHY_ADDRESS: false,
+    ServicesDBTcp: {},
+    START_PORT: 1,
+    END_PORT: 65535,
+    ADDR: false,
+};
+mod.NUM_PORTS = setNumPorts();
+mod.guard = workersGate(mod.WORKERS);
 
-module.exports.results = results;
+// exports for testing
+module.exports.mod = mod;
 
 function setNumPorts(start, end) {
-    if (isNaN(start) || isNaN(end) || start <= 0 || end > 65535) {
-        return NUM_PORTS;
+    if (arguments.length === 0) {
+        return  mod.END_PORT - mod.START_PORT + 1;
+    }
+    else if (isNaN(start) || isNaN(end) || start <= 0 || end > 65535) {
+        return mod.NUM_PORTS;
     }
     else if ((end - start) < 0) {
-        return NUM_PORTS;
+        return mod.NUM_PORTS;
     }
     else {
-        START_PORT = start;
-        END_PORT = end;
-        NUM_PORTS = END_PORT - START_PORT + 1;
-        return {start:START_PORT,end:END_PORT,numports:NUM_PORTS};
+        mod.START_PORT = start;
+        mod.END_PORT = end;
+        mod.NUM_PORTS = mod.END_PORT - mod.START_PORT + 1;
+        return {start:mod.START_PORT,end:mod.END_PORT,numports:mod.NUM_PORTS};
     }
 }
 module.exports.setNumPorts = setNumPorts;
 
 function countResults() {
-    return results.open.length+
-           results.closed.length+
-           results.filtered.length;
+    return mod.results.open.length+
+           mod.results.closed.length+
+           mod.results.filtered.length;
 }
 module.exports.countResults = countResults;
 
 // initializes one child per WORKERS
 module.exports.beginScan = function beginScan(addr) {
-    ADDR = addr;
-    exports.initServicesObject(ServicesDBTcp, scanInit);
-    console.log("Starting",WORKERS,"child processes for scanning address",ADDR,"for ports",START_PORT,"thru",END_PORT,":",NUM_PORTS,"ports");
+    mod.ADDR = addr;
+    exports.initServicesObject(mod.ServicesDBTcp, scanInit);
+    console.log("Starting",exports.WORKERS,"child processes for scanning address",mod.ADDR,"for ports",mod.START_PORT,"thru",mod.END_PORT,":",mod.NUM_PORTS,"ports");
 };
 
 // simple creation of an object to map ports to service names
@@ -97,21 +103,21 @@ module.exports.initServicesObject = function initServicesObject(obj, cb) {
 
 // private function to launch worker processes
 function scanInit() {
-    if (!ADDR) {
+    if (!mod.ADDR) {
         console.log("Address is not set");
         return undefined;
     }
-    for (var i = 0; i < WORKERS; ++i) {
-        var child = forkChildProcess(SCANNER_MODULE);
+    for (var i = 0; i < mod.WORKERS; ++i) {
+        var child = exports.forkChildProcess(SCANNER_MODULE);
         child.num = i;
-        children[i] = exports.initChild(child);
+        mod.children[i] = exports.initChild(child);
     }
-    return children;
+    return mod.children;
 }
 
-function forkChildProcess(modulename) {
+module.exports.forkChildProcess = function forkChildProcess(modulename) {
     return child_process.fork(path.resolve(modulename));
-}
+};
 
 function initChild(child) {
     child.assigned = {};
@@ -120,55 +126,62 @@ function initChild(child) {
     });
     child.on("exit", function parentExitHandler(e) {
         console.log("Child", child.num, "exited:", e);
-        var waiting = [];
-        for (var i = 0; i < child.assigned.length; ++i) {
-            if (Object.keys(child.assigned)[i] === "waiting") {
-                waiting.push(i);
+        var waiting = [],
+            assigned = Object.keys(child.assigned);
+        for (var i = 0; i < assigned.length; ++i) {
+            if (child.assigned[assigned[i]] === "waiting") {
+                waiting.push(assigned[i]);
             }
         }
         if (waiting.length > 0) {
             console.log("restarting child",child.num);
-            var new_child = forkChildProcess(SCANNER_MODULE);
+            var new_child = exports.forkChildProcess(SCANNER_MODULE);
             new_child.num = child.num;
-            children[new_child.num] = new_child;
+            mod.children[new_child.num] = new_child;
             initChild(new_child, waiting);
         }
         else {
-            guard();
+            console.log("Child",child.num,"exited but no work left to do");
+            mod.guard();
         }
     });
     child.on("message", function parentMsgHandler(msg) {
         if (msg.state === "open") {
-            results.open.push(msg.port+": "+ServicesDBTcp[msg.port]);
+            mod.results.open.push(msg.port+": "+mod.ServicesDBTcp[msg.port]);
         }
         else if (msg.state === "closed") {
-            results.closed.push(msg.port);
+            mod.results.closed.push(msg.port);
         }
         else if (msg.state === "filtered") {
-            results.filtered.push(msg.port);
+            mod.results.filtered.push(msg.port);
         }
-        results.scanned[msg.port] = true;
+        mod.results.scanned[msg.port] = true;
         child.assigned[msg.port] = "scanned";
         // All work complete case
-        if (countResults() === NUM_PORTS) {
-            console.log("DISCONNECTING",children.length,"CHILDREN");
-            children.forEach(function(c) {
+        if (countResults() >= mod.NUM_PORTS) {
+            child.lastworker = true;
+            console.log("DISCONNECTING",mod.children.length,"CHILDREN");
+            mod.children.forEach(function(c) {
                 c.disconnect();
             });
+            // If the math doesn't add up, throw, this is a bug
+            if (countResults() !== mod.NUM_PORTS) {
+                throw new Error("We somehow counted more work than we were supposed to do");
+            }
         }
     });
-    // default case
+    // default path
     if (arguments.length < 2) {
         console.log("Sending port messages to child",child.num);
-        for (var port = START_PORT+child.num; port <= END_PORT; port += WORKERS) {
-            child.send({port:port,addr:ADDR});
+        for (var port = mod.START_PORT+child.num; port <= mod.END_PORT; port += mod.WORKERS) {
+            child.send({port:port,addr:mod.ADDR});
             child.assigned[port] = "waiting";
         }
-    } // restarting failed child case with "waiting" ports array argument
+    } // restarting failed child with "waiting" ports array argument
     else {
         console.log("re-initializing child",child.num); 
         arguments[1].forEach(function(port) {
-            child.send({port:port,addr:ADDR});
+            child.send({port:port,addr:mod.ADDR});
             child.assigned[port] = "waiting";
         });
     }
@@ -189,17 +202,17 @@ function workersGate(numtasks) {
         count++;
         if (count == numtasks) {
             console.log("\n-=- results -=-\n");
-            if (FISHY_ADDRESS) {
-                console.log("** WARNING: Unreliable scan, fishy address:",ADDR,"**\n");
+            if (mod.FISHY_ADDRESS) {
+                console.log("** WARNING: Unreliable scan, fishy address:",mod.ADDR,"**\n");
             }
-            if (results.open.length) {
-                console.log("open TCP ports:\n",JSON.stringify(results.open,null,2));
+            if (mod.results.open.length) {
+                console.log("open TCP mod.ports:\n",JSON.stringify(mod.results.open,null,2));
             }
             else  {
                 console.log("No open ports");
             }
-            console.log(results.filtered.length, "ports timed out (filtered|closed|lost)");
-            console.log(results.closed.length, "ports are closed");
+            console.log(mod.results.filtered.length, "ports timed out (filtered|closed|lost)");
+            console.log(mod.results.closed.length, "ports are closed");
             return true;
         }
         else if (count < numtasks) {

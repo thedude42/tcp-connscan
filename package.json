@@ -5,7 +5,8 @@
   "main": "tcp-connscan",
   "dependencies": {},
   "devDependencies": {
-    "tape": "^4.2.2"
+    "tape": "^4.2.2",
+    "require-reload": "^0.2.2"
   },
   "bin": {
     "tcp-connscan": "bin/scanrunner.js"
