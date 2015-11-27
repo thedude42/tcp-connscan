@@ -141,7 +141,6 @@ function initChild(child) {
             initChild(new_child, waiting);
         }
         else {
-            console.log("Child",child.num,"exited but no work left to do");
             mod.guard();
         }
     });
