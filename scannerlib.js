@@ -88,7 +88,7 @@ module.exports.beginScan = function beginScan(addr) {
 module.exports.initServicesObject = function initServicesObject(obj, cb) {
     var record_regex = /(\S+)\s+(\d+)\/tcp.+/,
         filestream = fs.createReadStream("/etc/services"),
-        rl = readline.createInterface({input:filestream});
+        rl = readline.createInterface({terminal:false, input:filestream});
     rl.on("line", function(line) {
         var m = record_regex.exec(line);
         if (m) {
