@@ -132,7 +132,7 @@ test("** TEST SET #5: Verify beginScan(addr) chain, including initServicesObject
 });
 
 test("** TEST SET #6: childscanner", function(t) {
-
+    t.end();
 });
 
 function mockForkChild(modulename) {
