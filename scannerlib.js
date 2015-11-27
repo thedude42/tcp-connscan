@@ -205,7 +205,7 @@ function workersGate(numtasks) {
                 console.log("** WARNING: Unreliable scan, fishy address:",mod.ADDR,"**\n");
             }
             if (mod.results.open.length) {
-                console.log("open TCP mod.ports:\n",JSON.stringify(mod.results.open,null,2));
+                console.log("open TCP ports:\n",JSON.stringify(mod.results.open,null,2));
             }
             else  {
                 console.log("No open ports");
