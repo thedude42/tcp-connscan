@@ -131,8 +131,93 @@ test("** TEST SET #5: Verify beginScan(addr) chain, including initServicesObject
     }, 500);
 });
 
-test("** TEST SET #6: childscanner", function(t) {
-    t.end();
+test("TEST SET #6: childscanner basic message processing", function(t) {
+    var mockproc,
+        mocknet,
+        testhost = "127.0.0.1";
+    childscanner = reload("../childscanner");
+    mockproc = getMockProc(childscanner);
+    mocknet = getMockNet(childscanner);
+    t.plan(17);
+    t.equals(childscanner._msgqueue.length, 0, "Expected starting state msgqueue");
+    t.equals(childscanner._running, 0, "Expected starting state running");
+    mockproc.emit("disconnect");
+    setImmediate(function() {
+        t.ok(mockproc.EXITED, "disconnect message passedi to child");
+        mockproc.emit("message", {addr:testhost,port:20});
+        mockproc.emit("message", {addr:testhost,port:21});
+        mockproc.emit("message", {addr:testhost,port:22});
+        mockproc.emit("message", {addr:testhost,port:23});
+        setImmediate(function() {
+            t.equals(childscanner._msgqueue.length, 0, "All messages pulled");
+            t.equals(Object.keys(mocknet.connections).length, 4, "All connections created");
+            mocknet.connections["127.0.0.1:20"].emit("close");
+            mocknet.connections["127.0.0.1:21"].emit("error", {code:"ECONNREFUSED"});
+            mocknet.connections["127.0.0.1:22"].emit("connect");
+            mocknet.connections["127.0.0.1:23"].emit("error", {code:"ETIMEDOUT"});
+            setImmediate(function() {
+                t.ok(!mocknet.connections["127.0.0.1:20"].DESTROYED, "conn on port 20 NOT cleaned up");
+                t.ok(mocknet.connections["127.0.0.1:21"].DESTROYED, "conn on port 21 cleaned up");
+                t.ok(mocknet.connections["127.0.0.1:22"].DESTROYED, "conn on port 22 cleaned up");
+                t.ok(mocknet.connections["127.0.0.1:23"].DESTROYED, "conn on port 23 cleaned up");
+                t.equals(mockproc.childmsgs[0].port, 20, "port 20 message seen");
+                t.equals(mockproc.childmsgs[0].state, "filtered", "port 20 state correct");
+                t.equals(mockproc.childmsgs[1].port, 21, "port 21 message seen");
+                t.equals(mockproc.childmsgs[1].state, "closed", "port 21 state correct");
+                t.equals(mockproc.childmsgs[2].port, 22, "port 22 message seen");
+                t.equals(mockproc.childmsgs[2].state, "open", "port 22 state correct");
+                t.equals(mockproc.childmsgs[3].port, 23, "port 23 message seen");
+                t.equals(mockproc.childmsgs[3].state, "filtered", "port 23 state correct");
+                t.end();
+            });
+        });
+    });
+});
+
+test("TEST SET #7: childscanner throttling", function(t) {
+    var mockproc,
+        mocknet,
+        testhost = "127.0.0.1";
+    childscanner = reload("../childscanner");
+    mockproc = getMockProc(childscanner);
+    mocknet = getMockNet(childscanner);
+    t.plan(7);
+    t.equals(childscanner._msgqueue.length, 0, "Expected starting state msgqueue");
+    t.equals(childscanner._running, 0, "Expected starting state running");
+    for (var i = 1; i <= 102; ++i) {
+        mockproc.emit("message", {addr:testhost,port:i});
+    }
+    setImmediate(function() {
+        t.equals(childscanner._msgqueue.length, 2, "Two messages left on queue");
+        t.equals(Object.keys(mocknet.connections).length, 100, "All connections created");
+        Object.keys(mocknet.connections).forEach(function foreachMockConns(mockconn) {
+            mocknet.connections[mockconn].emit("connect");
+        });
+        setImmediate(function() {
+            countconnect = 0;
+            for (var i = 0; i < 100; ++i) {
+                if (mockproc.childmsgs[i].state === "open") {
+                    ++countconnect;
+                }
+            }
+            t.equals(countconnect, 100, "First 100 work messages received");
+            setTimeout(function waitingForTwoSecondChildQueuePoll() {
+                mocknet.connections["127.0.0.1:101"].emit("close");
+                setImmediate(function lastWorkItemCheck() {
+                    t.equals(mockproc.childmsgs[100].state, "filtered", "Last work piece done");
+                    setTimeout(function longWaitTestingTimeout() {
+                        t.equals(mockproc.childmsgs[101].state, "filtered", "Last work piece done");
+                        t.end();
+                    }, 5500);
+                });
+            }, 2500);
+        });
+    });
+});
+
+test("TEST SET #8: integration", function(t) {
+
+    t.end(); 
 });
 
 function mockForkChild(modulename) {
@@ -141,6 +226,41 @@ function mockForkChild(modulename) {
     return mockchild;
 }
 
+function getMockProc(childmodule) {
+    var procobj = new testChild();
+    procobj.childmsgs = [];
+    procobj.exit = function mockProcExit(val) {
+        procobj.EXITED = true;
+    };
+    procobj.send = function mockProcSend(obj) {
+        procobj.childmsgs.push(obj);
+    };
+    childmodule.setProcessHandlers(procobj);
+    return procobj;
+}
+
+function getMockNet(childmodule) {
+    var newnet = new testChild();
+    newnet.connections = {};
+    childmodule.mockNet(newnet);
+    newnet.connect = function mockNetConnect(hostportobj) {
+        var connkey = hostportobj.host+":"+hostportobj.port;
+        this.connections[connkey] = new testChild();
+        this.connections[connkey].destroy = function mockNetConnDestroy() {
+            this.DESTROYED = true;
+            this.emit("close");
+        };
+
+        return this.connections[connkey];
+    };
+    return newnet;
+}
+
+/* testChild()
+ * Overused mock object. Primarily designed for use with scannerlib.js testing,
+ * it is also an EventEmitter so we can use it to mock the process and net objects
+ * for testing childscanner.js
+ */
 function testChild() {
     this.connected = true;
     this.portMessageQueue = [];
@@ -156,4 +276,5 @@ testChild.prototype.disconnect = function childMockDisconnect() {
 testChild.prototype.send = function childMockSend(portobj) {
     this.portMessageQueue.push(portobj);
 };
+
 
