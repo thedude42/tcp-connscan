@@ -215,11 +215,6 @@ test("TEST SET #7: childscanner throttling", function(t) {
     });
 });
 
-test("TEST SET #8: integration", function(t) {
-
-    t.end(); 
-});
-
 function mockForkChild(modulename) {
     var mockchild = new testChild();
     mockchild.modulename = modulename;
