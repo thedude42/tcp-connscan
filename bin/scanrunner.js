@@ -1,5 +1,4 @@
 #! /usr/bin/env node
-console.log("console.log output");
 
 var scanner = require("../scannerlib"),
     dns = require("dns"),
@@ -19,10 +18,10 @@ dns.lookup(ADDR, function onDnsLookup(err, address, fam) {
         process.exit(1);
     }
     else {
-        if ( /^[0-9]+$/.test(ADDR)) {
-            console.log("fishy address:",address);
+        if ( /^0\..+$/.test(address)) {
+            console.log("bogon address:",address);
+            process.exit(1);
         }
-        FISHY_ADDRESS = true;
         scanner.beginScan(address);
     }
 });
